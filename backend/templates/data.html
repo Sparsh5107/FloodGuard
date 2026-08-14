@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}FloodGuard - Data{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script
+    src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<header>
+    <h1>Water Level Analytics</h1>
+    <p class="subtitle">Real-time sensor data, live trends, and flood monitoring</p>
+</header>
+
+<main>
+    <section class="live-stats-bar" id="live-stats-bar">
+        <div class="live-stat">
+            <span class="live-stat-icon">&#x1F4A1;</span>
+            <div class="live-stat-info">
+                <span class="live-stat-value" id="stat-total">--</span>
+                <span class="live-stat-label">Total Sensors</span>
+            </div>
+        </div>
+        <div class="live-stat">
+            <span class="live-stat-icon">&#x2705;</span>
+            <div class="live-stat-info">
+                <span class="live-stat-value" id="stat-active">--</span>
+                <span class="live-stat-label">Active</span>
+            </div>
+        </div>
+        <div class="live-stat">
+            <span class="live-stat-icon">&#x26A0;</span>
+            <div class="live-stat-info">
+                <span class="live-stat-value" id="stat-alerts" style="color:#ef4444;">--</span>
+                <span class="live-stat-label">Alerts</span>
+            </div>
+        </div>
+        <div class="live-stat">
+            <span class="live-stat-icon">&#x1F4CA;</span>
+            <div class="live-stat-info">
+                <span class="live-stat-value" id="stat-avg">--</span>
+                <span class="live-stat-label">Avg Level</span>
+            </div>
+        </div>
+        <div class="live-stat">
+            <span class="live-stat-icon">&#x1F504;</span>
+            <div class="live-stat-info">
+                <span class="live-stat-value live-stat-refresh" id="stat-refresh">Live</span>
+                <span class="live-stat-label">Status</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="sensor-overview" id="sensor-overview">
+        <!-- Overview cards injected by JS -->
+    </section>
+
+    <section class="sensor-charts">
+        <div class="section-header">
+            <div>
+                <h2>24-Hour Sensor Trends</h2>
+                <p class="section-desc">How water levels changed over the last 24 hours for each sensor</p>
+            </div>
+            <div class="section-right">
+                <div class="chart-type-selector" id="chart-type-selector">
+                    <button class="chart-type-btn active" data-type="line" title="Line Chart">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="3 17 8 11 13 15 21 5" />
+                        </svg>
+                        <span>Line</span>
+                    </button>
+                    <button class="chart-type-btn" data-type="bar" title="Bar Chart">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="3" y="12" width="4" height="9" />
+                            <rect x="10" y="7" width="4" height="14" />
+                            <rect x="17" y="3" width="4" height="18" />
+                        </svg>
+                        <span>Bar</span>
+                    </button>
+                    <button class="chart-type-btn" data-type="polarArea" title="Polar Area Chart">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 2 A10 10 0 0 1 22 12 L12 12 Z" fill="currentColor" opacity="0.3" />
+                            <path d="M12 12 L22 12 A10 10 0 0 1 17 19.5 Z" fill="currentColor" opacity="0.2" />
+                        </svg>
+                        <span>Polar</span>
+                    </button>
+                </div>
+                <div class="refresh-indicator" id="refresh-indicator">
+                    <span class="refresh-dot" id="refresh-dot"></span>
+                    <span>Refreshes every <strong id="refresh-interval">5 sec</strong></span>
+                </div>
+            </div>
+        </div>
+        <div class="sensor-charts-grid" id="sensor-charts-grid">
+            <!-- Charts injected by JS -->
+        </div>
+    </section>
+
+    <section class="readings">
+        <h2>Recent Readings <span class="count-badge">{{ readings_count }}</span></h2>
+        <table id="readings-table">
+            <thead>
+                <tr>
+                    <th>Sensor</th>
+                    <th>Location</th>
+                    <th>Water Level (cm)</th>
+                    <th>Status</th>
+                    <th>Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for reading in latest_readings %}
+                <tr class="{% if reading.is_alert %}row-alert{% else %}row-normal{% endif %}">
+                    <td>{{ reading.sensor.name }}</td>
+                    <td>{{ reading.sensor.location }}</td>
+                    <td><strong>{{ reading.level_cm }}</strong></td>
+                    <td>
+                        {% if reading.is_alert %}
+                        <span class="status-alert">ALERT</span>
+                        {% else %}
+                        <span class="status-normal">Normal</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ reading.timestamp|date:"M d, H:i:s" }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="5" class="no-data">No readings yet</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <section class="alert-log">
+        <h2>Alert Log <span class="count-badge">{{ alerts_count }}</span></h2>
+        <table id="alert-log-table">
+            <thead>
+                <tr>
+                    <th>Sensor</th>
+                    <th>Location</th>
+                    <th>Alert Type</th>
+                    <th>Message</th>
+                    <th>Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for alert in alert_logs %}
+                <tr class="row-{{ alert.alert_type }}">
+                    <td>{{ alert.sensor.name }}</td>
+                    <td>{{ alert.sensor.location }}</td>
+                    <td><span class="alert-badge alert-{{ alert.alert_type }}">{{ alert.alert_type|upper }}</span></td>
+                    <td>{{ alert.message }}</td>
+                    <td>{{ alert.created_at|date:"M d, H:i:s" }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="5" class="no-data">No alerts recorded</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</main>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    var SENSORS = {{ sensors_json | safe }};
+    var ALERT_COUNTS = {{ alert_counts| safe }};
+</script>
+<script src="{% static 'js/data-charts.js' %}"></script>
+<script src="{% static 'js/dashboard.js' %}"></script>
+{% endblock %}

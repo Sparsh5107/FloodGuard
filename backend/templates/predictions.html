@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}FloodGuard - Predictions{% endblock %}
+
+{% block content %}
+    <header>
+        <h1>Flood Predictions</h1>
+        <p class="subtitle">Weather, rainfall, and flood risk analysis</p>
+    </header>
+
+    <main>
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="predictions">&#128200; Flood Predictions</button>
+            <button class="tab-btn" data-tab="weather">&#127782; Weather</button>
+            <button class="tab-btn" data-tab="river">&#127754; River Discharge</button>
+        </div>
+
+        <div class="tab-content active" id="tab-predictions">
+            <div id="predictions-container" class="predictions-grid">
+                <p class="loading-text">Loading predictions...</p>
+            </div>
+        </div>
+
+        <div class="tab-content" id="tab-weather">
+            <div id="weather-container" class="weather-grid">
+                <p class="loading-text">Loading weather data...</p>
+            </div>
+        </div>
+
+        <div class="tab-content" id="tab-river">
+            <div id="flood-container" class="flood-grid">
+                <p class="loading-text">Loading river data...</p>
+            </div>
+        </div>
+    </main>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'js/predictions.js' %}"></script>
+{% endblock %}

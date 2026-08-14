@@ -1,0 +1,45 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}FloodGuard{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <div id="offline-popup" class="offline-popup hidden">
+        <div class="offline-popup-content">
+            <div class="offline-popup-header">
+                <span class="offline-popup-icon">&#9888;</span>
+                <h2>SENSOR OFFLINE ALERT</h2>
+            </div>
+            <div id="offline-popup-body" class="offline-popup-body"></div>
+            <button id="offline-popup-dismiss" class="offline-popup-dismiss">Dismiss</button>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <nav class="navbar">
+        <div class="nav-brand">FloodGuard</div>
+        <div class="nav-links">
+            <a href="{% url 'dashboard' %}" class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">Overview</a>
+            <a href="{% url 'data' %}" class="nav-link {% if request.resolver_match.url_name == 'data' %}active{% endif %}">Data</a>
+            <a href="{% url 'map' %}" class="nav-link {% if request.resolver_match.url_name == 'map' %}active{% endif %}">Map</a>
+            <a href="{% url 'predictions_page' %}" class="nav-link {% if request.resolver_match.url_name == 'predictions_page' %}active{% endif %}">Predictions</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% block content %}{% endblock %}
+
+        <footer>
+            <p>Last updated: <span id="last-update"></span></p>
+        </footer>
+    </div>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

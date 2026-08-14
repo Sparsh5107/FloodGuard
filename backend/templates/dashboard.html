@@ -1,0 +1,129 @@
+﻿{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}FloodGuard Dashboard{% endblock %}
+
+{% block content %}
+    <script type="application/json" id="sensor-status-data">
+        [
+        {% for item in sensor_status %}
+            {
+                "device_id": "{{ item.sensor.device_id }}",
+                "name": "{{ item.sensor.name }}",
+                "location": "{{ item.sensor.location }}",
+                "status": "{{ item.status }}",
+                "level_cm": {{ item.current_level }}
+            }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+        ]
+    </script>
+
+    <header>
+        <h1>FloodGuard Dashboard</h1>
+        <p class="subtitle">Real-time Flood Monitoring System</p>
+    </header>
+
+    <main>
+        <div class="stats-bar">
+            <div class="stat-card">
+                <div class="stat-icon">&#128225;</div>
+                <div class="stat-info">
+                    <span class="stat-value">{{ total_sensors }}</span>
+                    <span class="stat-label">Total Sensors</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon stat-active">&#9989;</div>
+                <div class="stat-info">
+                    <span class="stat-value">{{ active_sensors }}</span>
+                    <span class="stat-label">Active</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon stat-alert">&#9888;</div>
+                <div class="stat-info">
+                    <span class="stat-value">{{ active_alerts }}</span>
+                    <span class="stat-label">Active Alerts</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon stat-level">&#128167;</div>
+                <div class="stat-info">
+                    <span class="stat-value">{{ avg_level }}<small>cm</small></span>
+                    <span class="stat-label">Avg Water Level</span>
+                </div>
+            </div>
+        </div>
+
+        <section class="current-status">
+            <h2>Current Status</h2>
+            <div id="status-container">
+                {% for item in sensor_status %}
+                <div class="status-card status-{{ item.status }}">
+                    <div class="status-header">
+                        <h3>{{ item.sensor.name }}</h3>
+                        <span class="status-indicator {{ item.status }}">
+                            {% if item.status == 'rising' %}&#8593;{% elif item.status == 'falling' %}&#8595;{% elif item.status == 'stable' %}&#8594;{% endif %}
+                            {{ item.status|upper }}
+                        </span>
+                    </div>
+                    <p class="status-location">{{ item.sensor.location }}</p>
+                    <div class="status-level">
+                        <span class="level-label">Current Level:</span>
+                        <span class="level-value">{{ item.current_level }} cm</span>
+                    </div>
+                    <div class="level-bar-container">
+                        <div class="level-bar" style="width: {% widthratio item.current_level 100 100 %}%; background: {% if item.current_level >= 70 %}#dc3545{% elif item.current_level >= 50 %}#fd7e14{% elif item.current_level >= 30 %}#ffc107{% else %}#28a745{% endif %};"></div>
+                    </div>
+                    {% if item.status == 'offline' %}
+                    <p class="status-message">Sensor is offline - No data received for 60+ seconds</p>
+                    {% elif item.status == 'rising' %}
+                    <p class="status-message">Water level is rising - Monitor closely</p>
+                    {% elif item.status == 'falling' %}
+                    <p class="status-message">Water level is falling - Situation improving</p>
+                    {% elif item.status == 'stable' %}
+                    <p class="status-message">Water level is stable</p>
+                    {% else %}
+                    <p class="status-message">No data received yet</p>
+                    {% endif %}
+                </div>
+                {% empty %}
+                <p class="no-data">No sensor data available</p>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="sensors">
+            <h2>Sensor Status</h2>
+            <div class="sensors-grid">
+                {% for item in sensor_status %}
+                <div class="sensor-card {% if item.status == 'offline' %}pulse-offline{% endif %}">
+                    <div class="sensor-header">
+                        <h3>{{ item.sensor.name }}</h3>
+                        {% if item.status == 'offline' %}
+                            <span class="sensor-status inactive">OFFLINE</span>
+                        {% else %}
+                            <span class="sensor-status active">Active</span>
+                        {% endif %}
+                    </div>
+                    <p class="sensor-location">{{ item.sensor.location }}</p>
+                    <p class="sensor-id">Device ID: {{ item.sensor.device_id }}</p>
+                    <p class="sensor-last-seen">Last seen: {{ item.sensor.last_seen|date:"M d, H:i:s" }}</p>
+                    <div class="latest-reading">
+                        <span class="reading-label">Current Level:</span>
+                        <span class="reading-value" id="reading-{{ item.sensor.device_id }}">
+                            {{ item.current_level }} cm
+                        </span>
+                    </div>
+                </div>
+                {% empty %}
+                <p class="no-data">No sensors registered</p>
+                {% endfor %}
+            </div>
+        </section>
+    </main>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="{% static 'js/dashboard.js' %}"></script>
+{% endblock %}

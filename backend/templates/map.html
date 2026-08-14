@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}FloodGuard - Sensor Map{% endblock %}
+
+{% block extra_head %}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        footer { display: none; }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="map-page">
+        <aside class="map-sidebar glass" id="map-sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-title">
+                    <span class="sidebar-icon">&#x1F4CA;</span>
+                    <h2>Sensors</h2>
+                </div>
+                <button class="sidebar-toggle" id="sidebar-toggle">
+                    <span class="toggle-icon">&#9776;</span>
+                </button>
+            </div>
+            <div class="sidebar-sensors" id="sidebar-sensors"></div>
+            <div class="sidebar-legend">
+                <div class="legend-item"><span class="legend-dot" style="background:#28a745;"></span> Normal</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#ffc107;"></span> Warning</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#fd7e14;"></span> Danger</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#dc3545;"></span> Critical</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#6c757d;"></span> Offline</div>
+            </div>
+        </aside>
+
+        <div class="map-container">
+            <div id="sensor-map" class="sensor-map"></div>
+
+            <div class="map-controls">
+                <button class="map-ctrl-btn" id="satellite-toggle" title="Toggle satellite view">
+                    <span class="ctrl-icon">&#x1F30D;</span>
+                    <span class="ctrl-label">Satellite</span>
+                </button>
+                <button class="map-ctrl-btn" id="lines-toggle" title="Toggle connection lines">
+                    <span class="ctrl-icon">&#x1F4CF;</span>
+                    <span class="ctrl-label">Lines</span>
+                </button>
+                <button class="map-ctrl-btn active" id="recenter-btn" title="Recenter map">
+                    <span class="ctrl-icon">&#x21BA;</span>
+                    <span class="ctrl-label">Recenter</span>
+                </button>
+            </div>
+
+            <div class="timeline-panel" id="timeline-panel">
+                <div class="timeline-header">
+                    <span class="timeline-title">&#x1F4C5; Timeline</span>
+                    <span class="timeline-label" id="timeline-label">Live</span>
+                </div>
+                <input type="range" id="timeline-slider" class="timeline-slider" min="0" max="100" value="100" />
+                <div class="timeline-ticks">
+                    <span>24h ago</span>
+                    <span>18h</span>
+                    <span>12h</span>
+                    <span>6h</span>
+                    <span>Now</span>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="{% static 'js/map.js' %}"></script>
+{% endblock %}

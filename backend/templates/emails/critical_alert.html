@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: {% if alert.alert_type == 'critical' %}#dc3545{% elif alert.alert_type == 'danger' %}#fd7e14{% else %}#ffc107{% endif %}; color: {% if alert.alert_type == 'warning' %}#333{% else %}white{% endif %}; padding: 20px; border-radius: 8px 8px 0 0;">
+        <h1 style="margin: 0;">{% if alert.alert_type == 'critical' %}CRITICAL{% elif alert.alert_type == 'danger' %}DANGER{% else %}WARNING{% endif %} FLOOD ALERT</h1>
+    </div>
+    <div style="border: 1px solid #ddd; padding: 20px; border-radius: 0 0 8px 8px;">
+        <p>Hi {{ recipient_name }},</p>
+
+        <p><strong>Sensor:</strong> {{ sensor.name }}<br>
+        <strong>Location:</strong> {{ sensor.location }}<br>
+        <strong>Water Level:</strong> {{ alert.water_level.level_cm }} cm<br>
+        <strong>Time:</strong> {{ alert.created_at|date:"M d, Y H:i:s" }}</p>
+
+        <p style="background: {% if alert.alert_type == 'critical' %}#f8d7da{% elif alert.alert_type == 'danger' %}#fff3cd{% else %}#d1ecf1{% endif %}; padding: 15px; border-radius: 4px; border-left: 4px solid {% if alert.alert_type == 'critical' %}#dc3545{% elif alert.alert_type == 'danger' %}#fd7e14{% else %}#0c5460{% endif %};">
+            {{ alert.message }}
+        </p>
+
+        <p>
+            <a href="{{ site_url }}/admin/core/alert/{{ alert.id }}/change/"
+               style="background: {% if alert.alert_type == 'critical' %}#dc3545{% elif alert.alert_type == 'danger' %}#fd7e14{% else %}#ffc107{% endif %}; color: {% if alert.alert_type == 'warning' %}#333{% else %}white{% endif %}; padding: 12px 24px;
+                      text-decoration: none; border-radius: 4px; display: inline-block;">
+                View in Dashboard
+            </a>
+        </p>
+
+        <hr style="margin: 20px 0;">
+        <p style="color: #666; font-size: 12px;">
+            FloodGuard Monitoring System |
+            <a href="{{ site_url }}/admin/core/notificationrecipient/">Manage Alert Preferences</a>
+        </p>
+    </div>
+</body>
+</html>
