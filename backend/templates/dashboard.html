@@ -24,7 +24,16 @@
     </header>
 
     <main>
-        <div class="stats-bar">
+        <div id="error-banner" class="error-banner hidden">
+            <span class="error-banner-icon">&#9888;</span>
+            <div class="error-banner-content">
+                <div class="error-banner-title">Connection Error</div>
+                <div class="error-banner-message" id="error-message">Unable to fetch sensor data.</div>
+            </div>
+            <button class="error-banner-retry" id="error-retry-btn">Retry</button>
+        </div>
+
+        <div class="stats-bar" id="stats-bar">
             <div class="stat-card">
                 <div class="stat-icon">&#128225;</div>
                 <div class="stat-info">
@@ -95,7 +104,7 @@
 
         <section class="sensors">
             <h2>Sensor Status</h2>
-            <div class="sensors-grid">
+            <div class="sensors-grid" id="sensors-grid">
                 {% for item in sensor_status %}
                 <div class="sensor-card {% if item.status == 'offline' %}pulse-offline{% endif %}">
                     <div class="sensor-header">

@@ -3,13 +3,12 @@ from django.utils import timezone
 from concurrent.futures import ThreadPoolExecutor
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from core.models import Sensor, WaterLevel, Alert
 from .serializers import SensorSerializer, WaterLevelSerializer, AlertSerializer
 from core.notifications.service import NotificationService
-from core.weather import get_current_weather, get_rainfall_forecast, get_daily_forecast
-from core.flood_api import get_river_discharge
-from core.prediction import get_all_predictions, predict_flood
+from core.weather import get_current_weather
 
 OFFLINE_TIMEOUT = timedelta(seconds=2)
 
@@ -39,6 +38,13 @@ class WaterLevelViewSet(viewsets.ModelViewSet):
 class AlertViewSet(viewsets.ModelViewSet):
     queryset = Alert.objects.all()
     serializer_class = AlertSerializer
+
+    @action(detail=True, methods=['post'])
+    def acknowledge(self, request, pk=None):
+        alert = self.get_object()
+        alert.is_resolved = True
+        alert.save(update_fields=['is_resolved'])
+        return Response({'status': 'ok'})
 
 
 @api_view(['POST'])
@@ -168,7 +174,9 @@ def sensor_history_api(request, device_id):
     except Sensor.DoesNotExist:
         return Response({'error': 'Sensor not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    since = timezone.now() - timedelta(hours=24)
+    hours = int(request.query_params.get('hours', 24))
+    hours = min(max(hours, 1), 72)
+    since = timezone.now() - timedelta(hours=hours)
     readings = WaterLevel.objects.filter(
         sensor=sensor, timestamp__gte=since
     ).order_by('timestamp').values('timestamp', 'level_cm')
@@ -179,6 +187,37 @@ def sensor_history_api(request, device_id):
     ]
 
     return Response({'device_id': device_id, 'history': history})
+
+
+@api_view(['GET'])
+def system_stats_api(request):
+    """System-wide statistics for mobile app."""
+    now = timezone.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    sensors = Sensor.objects.all()
+    total_sensors = sensors.count()
+    online_sensors = sensors.filter(
+        last_seen__gte=now - timedelta(seconds=2)
+    ).count()
+
+    total_readings = WaterLevel.objects.count()
+    readings_today = WaterLevel.objects.filter(
+        timestamp__gte=today_start
+    ).count()
+
+    total_alerts = Alert.objects.count()
+    unresolved_alerts = Alert.objects.filter(is_resolved=False).count()
+
+    return Response({
+        'total_sensors': total_sensors,
+        'active_sensors': online_sensors,
+        'online_sensors': online_sensors,
+        'unresolved_alerts': unresolved_alerts,
+        'total_readings': total_readings,
+        'total_alerts': total_alerts,
+        'readings_today': readings_today,
+    })
 
 
 @api_view(['GET'])
@@ -196,10 +235,12 @@ def dashboard_data_api(request):
     } for r in readings]
 
     alerts_data = [{
+        'id': a.id,
         'sensor_name': a.sensor.name,
         'location': a.sensor.location,
         'alert_type': a.alert_type,
         'message': a.message,
+        'is_resolved': a.is_resolved,
         'created_at': a.created_at.strftime('%b %d, %H:%M:%S'),
     } for a in alerts]
 
@@ -210,69 +251,4 @@ def dashboard_data_api(request):
     return response
 
 
-@api_view(['GET'])
-def weather_api(request):
-    """Get weather data for all sensors."""
-    sensors = Sensor.objects.filter(is_active=True)
-    results = []
 
-    for sensor in sensors:
-        if sensor.latitude is None or sensor.longitude is None:
-            results.append({"device_id": sensor.device_id, "name": sensor.name, "weather": None})
-            continue
-
-        current = get_current_weather(sensor.latitude, sensor.longitude)
-        forecast = get_rainfall_forecast(sensor.latitude, sensor.longitude, days=3)
-        daily = get_daily_forecast(sensor.latitude, sensor.longitude, days=7)
-
-        results.append({
-            "device_id": sensor.device_id,
-            "name": sensor.name,
-            "location": sensor.location,
-            "weather": current,
-            "rainfall_forecast": forecast.get("summary") if forecast else None,
-            "daily_forecast": daily.get("daily", [])[:7] if daily else [],
-        })
-
-    return Response({"sensors": results})
-
-
-@api_view(['GET'])
-def flood_data_api(request):
-    """Get river discharge data for all sensors."""
-    sensors = Sensor.objects.filter(is_active=True)
-    results = []
-
-    for sensor in sensors:
-        if sensor.latitude is None or sensor.longitude is None:
-            results.append({"device_id": sensor.device_id, "name": sensor.name, "flood_data": None})
-            continue
-
-        flood = get_river_discharge(sensor.latitude, sensor.longitude, days=30)
-        results.append({
-            "device_id": sensor.device_id,
-            "name": sensor.name,
-            "location": sensor.location,
-            "flood_data": flood,
-        })
-
-    return Response({"sensors": results})
-
-
-@api_view(['GET'])
-def predictions_api(request):
-    """Get flood predictions for all sensors."""
-    predictions = get_all_predictions()
-    return Response({"predictions": predictions})
-
-
-@api_view(['GET'])
-def prediction_api(request, device_id):
-    """Get flood prediction for a single sensor."""
-    try:
-        sensor = Sensor.objects.get(device_id=device_id)
-    except Sensor.DoesNotExist:
-        return Response({'error': 'Sensor not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    prediction = predict_flood(sensor)
-    return Response(prediction)

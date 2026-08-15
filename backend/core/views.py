@@ -94,7 +94,7 @@ def data_view(request):
                 if len(readings_list) == 2:
                     if readings_list[0].level_cm > readings_list[1].level_cm:
                         status = 'rising'
-                    elif readings[0].level_cm < readings[1].level_cm:
+                    elif readings_list[0].level_cm < readings_list[1].level_cm:
                         status = 'falling'
                     else:
                         status = 'stable'
@@ -146,8 +146,5 @@ def map_view(request):
     return render(request, 'map.html')
 
 
-def predictions_view(request):
-    """Predictions page with weather, flood, and trend analysis"""
-    return render(request, 'predictions.html')
 
 

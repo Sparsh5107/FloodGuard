@@ -16,6 +16,15 @@
 </header>
 
 <main>
+    <div id="error-banner" class="error-banner hidden">
+        <span class="error-banner-icon">&#9888;</span>
+        <div class="error-banner-content">
+            <div class="error-banner-title">Connection Error</div>
+            <div class="error-banner-message" id="error-message">Unable to fetch sensor data.</div>
+        </div>
+        <button class="error-banner-retry" id="error-retry-btn">Retry</button>
+    </div>
+
     <section class="live-stats-bar" id="live-stats-bar">
         <div class="live-stat">
             <span class="live-stat-icon">&#x1F4A1;</span>
@@ -55,7 +64,10 @@
     </section>
 
     <section class="sensor-overview" id="sensor-overview">
-        <!-- Overview cards injected by JS -->
+        <div class="skeleton-stat skeleton"></div>
+        <div class="skeleton-stat skeleton"></div>
+        <div class="skeleton-stat skeleton"></div>
+        <div class="skeleton-stat skeleton"></div>
     </section>
 
     <section class="sensor-charts">
@@ -99,13 +111,15 @@
             </div>
         </div>
         <div class="sensor-charts-grid" id="sensor-charts-grid">
-            <!-- Charts injected by JS -->
+            <div class="skeleton-chart skeleton"></div>
+            <div class="skeleton-chart skeleton"></div>
         </div>
     </section>
 
     <section class="readings">
         <h2>Recent Readings <span class="count-badge">{{ readings_count }}</span></h2>
-        <table id="readings-table">
+        <div class="table-responsive">
+            <table id="readings-table">
             <thead>
                 <tr>
                     <th>Sensor</th>
@@ -137,11 +151,13 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
     </section>
 
     <section class="alert-log">
         <h2>Alert Log <span class="count-badge">{{ alerts_count }}</span></h2>
-        <table id="alert-log-table">
+        <div class="table-responsive">
+            <table id="alert-log-table">
             <thead>
                 <tr>
                     <th>Sensor</th>
@@ -167,6 +183,7 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
     </section>
 </main>
 {% endblock %}
@@ -177,5 +194,4 @@
     var ALERT_COUNTS = {{ alert_counts| safe }};
 </script>
 <script src="{% static 'js/data-charts.js' %}"></script>
-<script src="{% static 'js/dashboard.js' %}"></script>
 {% endblock %}

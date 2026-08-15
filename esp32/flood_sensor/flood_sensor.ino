@@ -2,11 +2,11 @@
 #include <WiFi.h>
 
 // TODO: Fill in your WiFi credentials before uploading
-const char *ssid = "YOUR_WIFI_SSID";
-const char *password = "YOUR_WIFI_PASSWORD";
+const char *ssid = "Airtel_spar_5120";
+const char *password = "OneTwoThree4#";
 
 // TODO: Fill in your backend server URL
-const char *serverUrl = "http://YOUR_SERVER_IP:8000/api/sensor-data/";
+const char *serverUrl = "http://192.168.1.7:8000/api/sensor-data/";
 
 struct SensorConfig {
   const char *deviceId;

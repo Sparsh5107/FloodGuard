@@ -5,6 +5,58 @@
     var TOAST_DURATION = 5000;
     var previousStatus = {};
     var audioCtx = null;
+    var firstPoll = true;
+
+    function sanitizeText(str) {
+        if (!str) return '';
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    function showErrorBanner(message) {
+        var banner = document.getElementById('error-banner');
+        var msgEl = document.getElementById('error-message');
+        if (banner) banner.classList.remove('hidden');
+        if (msgEl) msgEl.textContent = message;
+    }
+
+    function hideErrorBanner() {
+        var banner = document.getElementById('error-banner');
+        if (banner) banner.classList.add('hidden');
+    }
+
+    var STATUS_LABELS = {
+        offline: 'Offline', rising: 'Rising', falling: 'Falling', stable: 'Stable', no_data: 'No Data'
+    };
+    var STATUS_ICONS = {
+        offline: '&#9888;', rising: '&#9650;', falling: '&#9660;', stable: '&#9644;', no_data: '&#8212;'
+    };
+
+    function removeSkeletons() {
+        if (!firstPoll) return;
+        firstPoll = false;
+        var skeletons = document.querySelectorAll('.skeleton');
+        skeletons.forEach(function(el) { el.remove(); });
+    }
+
+    function buildStatusCards(sensors) {
+        var container = document.getElementById('status-container');
+        if (!container || !sensors || sensors.length === 0) return;
+        var html = '';
+        sensors.forEach(function(s) {
+            var status = s.status || 'offline';
+            var icon = STATUS_ICONS[status] || '&#8212;';
+            var label = STATUS_LABELS[status] || status;
+            var level = s.level_cm || 0;
+            html += '<div class="status-card status-' + status + '">' +
+                '<div class="status-header"><h3>' + sanitizeText(s.name) + '</h3><span class="status-indicator ' + status + '">' + icon + ' ' + label + '</span></div>' +
+                '<div class="status-location">' + sanitizeText(s.location) + '</div>' +
+                '<div class="status-level"><span class="level-label">Water Level:</span><span class="level-value">' + level + ' cm</span></div>' +
+                '</div>';
+        });
+        container.innerHTML = html;
+    }
 
     function initAudio() {
         if (!audioCtx) {
@@ -105,7 +157,7 @@
 
         var html = '<p>The following sensors are no longer sending data:</p><ul>';
         sensors.forEach(function(s) {
-            html += '<li><strong>' + s.name + '</strong> (' + s.location + ')</li>';
+            html += '<li><strong>' + sanitizeText(s.name) + '</strong> (' + sanitizeText(s.location) + ')</li>';
         });
         html += '</ul>';
         popupBody.innerHTML = html;
@@ -142,6 +194,9 @@
             })
             .then(function(data) {
                 if (!data.sensors) return;
+
+                hideErrorBanner();
+                removeSkeletons();
 
                 var dismissed = [];
                 try { dismissed = JSON.parse(localStorage.getItem('fg_dismissed') || '[]'); } catch(e) {}
@@ -192,6 +247,7 @@
             })
             .catch(function(err) {
                 console.error('Poll error:', err);
+                showErrorBanner('Unable to fetch sensor data. Check your connection.');
             });
     }
 
@@ -236,7 +292,8 @@
                     var indicator = card.querySelector('.status-indicator');
                     if (indicator) {
                         indicator.className = 'status-indicator ' + sensor.status;
-                        indicator.textContent = sensor.status.toUpperCase();
+                        var icon = sensor.status === 'rising' ? '&#8593; ' : sensor.status === 'falling' ? '&#8595; ' : sensor.status === 'stable' ? '&#8594; ' : '';
+                        indicator.innerHTML = icon + sensor.status.toUpperCase();
                     }
 
                     var levelVal = card.querySelector('.level-value');
@@ -273,11 +330,11 @@
                                 ? '<span class="status-alert">ALERT</span>'
                                 : '<span class="status-normal">Normal</span>';
                             html += '<tr>' +
-                                '<td>' + r.sensor_name + '</td>' +
-                                '<td>' + r.location + '</td>' +
-                                '<td>' + r.level_cm + '</td>' +
+                                '<td>' + sanitizeText(r.sensor_name) + '</td>' +
+                                '<td>' + sanitizeText(r.location) + '</td>' +
+                                '<td>' + sanitizeText(r.level_cm) + '</td>' +
                                 '<td>' + statusHtml + '</td>' +
-                                '<td>' + r.timestamp + '</td>' +
+                                '<td>' + sanitizeText(r.timestamp) + '</td>' +
                                 '</tr>';
                         });
                         if (!html) {
@@ -293,11 +350,11 @@
                         var html = '';
                         data.alerts.forEach(function(a) {
                             html += '<tr>' +
-                                '<td>' + a.sensor_name + '</td>' +
-                                '<td>' + a.location + '</td>' +
-                                '<td><span class="alert-badge alert-' + a.alert_type + '">' + a.alert_type.toUpperCase() + '</span></td>' +
-                                '<td>' + a.message + '</td>' +
-                                '<td>' + a.created_at + '</td>' +
+                                '<td>' + sanitizeText(a.sensor_name) + '</td>' +
+                                '<td>' + sanitizeText(a.location) + '</td>' +
+                                '<td><span class="alert-badge alert-' + sanitizeText(a.alert_type) + '">' + sanitizeText(a.alert_type.toUpperCase()) + '</span></td>' +
+                                '<td>' + sanitizeText(a.message) + '</td>' +
+                                '<td>' + sanitizeText(a.created_at) + '</td>' +
                                 '</tr>';
                         });
                         if (!html) {
@@ -314,6 +371,15 @@
 
     document.addEventListener('DOMContentLoaded', function() {
         updateLastUpdateTime();
+
+        var retryBtn = document.getElementById('error-retry-btn');
+        if (retryBtn) {
+            retryBtn.addEventListener('click', function() {
+                hideErrorBanner();
+                pollSensorStatus();
+                pollDashboardData();
+            });
+        }
 
         var sensorStatusEl = document.getElementById('sensor-status-data');
         if (sensorStatusEl) {

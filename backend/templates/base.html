@@ -28,7 +28,7 @@
             <a href="{% url 'dashboard' %}" class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">Overview</a>
             <a href="{% url 'data' %}" class="nav-link {% if request.resolver_match.url_name == 'data' %}active{% endif %}">Data</a>
             <a href="{% url 'map' %}" class="nav-link {% if request.resolver_match.url_name == 'map' %}active{% endif %}">Map</a>
-            <a href="{% url 'predictions_page' %}" class="nav-link {% if request.resolver_match.url_name == 'predictions_page' %}active{% endif %}">Predictions</a>
+
         </div>
     </nav>
 
