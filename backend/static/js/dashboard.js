@@ -40,6 +40,13 @@
         skeletons.forEach(function(el) { el.remove(); });
     }
 
+    function getLevelClass(level) {
+        if (level >= 70) return 'level-critical';
+        if (level >= 50) return 'level-danger';
+        if (level >= 30) return 'level-warning';
+        return 'level-safe';
+    }
+
     function buildStatusCards(sensors) {
         var container = document.getElementById('status-container');
         if (!container || !sensors || sensors.length === 0) return;
@@ -291,9 +298,16 @@
 
                     var indicator = card.querySelector('.status-indicator');
                     if (indicator) {
-                        indicator.className = 'status-indicator ' + sensor.status;
+                        var levelClass = getLevelClass(sensor.level_cm);
+                        var newClass = 'status-indicator ' + sensor.status + ' ' + levelClass;
+                        indicator.className = newClass;
                         var icon = sensor.status === 'rising' ? '&#8593; ' : sensor.status === 'falling' ? '&#8595; ' : sensor.status === 'stable' ? '&#8594; ' : '';
                         indicator.innerHTML = icon + sensor.status.toUpperCase();
+
+                        var scale = sensor.status === 'rising' ? '1.15' : sensor.status === 'falling' ? '0.85' : '1';
+                        requestAnimationFrame(function() {
+                            indicator.style.transform = 'scale(' + scale + ')';
+                        });
                     }
 
                     var levelVal = card.querySelector('.level-value');

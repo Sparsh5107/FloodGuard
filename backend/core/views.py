@@ -2,8 +2,8 @@
 import json
 from django.shortcuts import render
 from django.utils import timezone
-from django.db.models import Q, Avg
 from django.core.serializers.json import DjangoJSONEncoder
+from core.utils import get_sensor_status
 from .models import Sensor, WaterLevel, Alert
 
 OFFLINE_TIMEOUT = timedelta(seconds=2)
@@ -22,30 +22,12 @@ def dashboard(request):
     sensor_count = 0
     
     for sensor in sensors:
-        if sensor.last_seen is None or now - sensor.last_seen > OFFLINE_TIMEOUT:
-            status = 'offline'
-            current = 0
-        else:
+        result = get_sensor_status(sensor, now)
+        status = result["status"]
+        current = result["current_level"]
+
+        if status != "offline":
             active_count += 1
-            # Check water level trend
-            readings = WaterLevel.objects.filter(sensor=sensor).order_by('-timestamp')[:2]
-            readings_list = list(readings)
-            if len(readings_list) == 2:
-                current = readings_list[0].level_cm
-                previous = readings_list[1].level_cm
-                if current > previous:
-                    status = 'rising'
-                elif current < previous:
-                    status = 'falling'
-                else:
-                    status = 'stable'
-            elif len(readings_list) == 1:
-                status = 'stable'
-                current = readings_list[0].level_cm
-            else:
-                status = 'no_data'
-                current = 0
-            
             total_level += current
             sensor_count += 1
         
@@ -83,26 +65,9 @@ def data_view(request):
     # Build sensor data for individual charts
     sensor_chart_data = []
     for sensor in sensors:
-        if sensor.last_seen is None or (now - sensor.last_seen) > OFFLINE_TIMEOUT:
-            status = 'offline'
-            current_level = 0
-        else:
-            readings = WaterLevel.objects.filter(sensor=sensor).order_by('-timestamp')[:2]
-            readings_list = list(readings)
-            if len(readings_list) >= 1:
-                current_level = readings_list[0].level_cm
-                if len(readings_list) == 2:
-                    if readings_list[0].level_cm > readings_list[1].level_cm:
-                        status = 'rising'
-                    elif readings_list[0].level_cm < readings_list[1].level_cm:
-                        status = 'falling'
-                    else:
-                        status = 'stable'
-                else:
-                    status = 'stable'
-            else:
-                status = 'no_data'
-                current_level = 0
+        result = get_sensor_status(sensor, now)
+        status = result["status"]
+        current_level = result["current_level"]
 
         # Determine alert level
         if current_level >= 70:

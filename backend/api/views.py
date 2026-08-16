@@ -5,12 +5,14 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import api_view
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 from core.models import Sensor, WaterLevel, Alert
+from core.utils import get_sensor_status
 from .serializers import SensorSerializer, WaterLevelSerializer, AlertSerializer
 from core.notifications.service import NotificationService
-from core.weather import get_current_weather
 
-OFFLINE_TIMEOUT = timedelta(seconds=2)
+OFFLINE_TIMEOUT = timedelta(seconds=10)
 
 # Flood alert thresholds (in cm)
 THRESHOLD_WARNING = 30
@@ -60,6 +62,9 @@ def receive_sensor_data(request):
     except (TypeError, ValueError):
         return Response({'error': 'level_cm must be a number'}, status=status.HTTP_400_BAD_REQUEST)
 
+    if level_cm < 0 or level_cm > 100:
+        return Response({'error': 'level_cm must be between 0 and 100'}, status=status.HTTP_400_BAD_REQUEST)
+
     try:
         sensor = Sensor.objects.get(device_id=device_id)
     except Sensor.DoesNotExist:
@@ -68,34 +73,25 @@ def receive_sensor_data(request):
     sensor.last_seen = timezone.now()
     sensor.save(update_fields=['last_seen'])
 
-    # Smart logging: check if we should save this reading
-    last_reading = WaterLevel.objects.filter(sensor=sensor).order_by('-timestamp').first()
-    should_save = False
+    channel_layer = get_channel_layer()
+    status_val = get_sensor_status(sensor, timezone.now())["status"]
+    now = timezone.now()
 
-    if last_reading is None:
-        # First reading for this sensor — always save
-        should_save = True
-    else:
-        time_since_last = timezone.now() - last_reading.timestamp
-        level_change = abs(level_cm - last_reading.level_cm)
-
-        # Save if: change > 5 cm OR 5 minutes passed
-        if level_change > CHANGE_THRESHOLD or time_since_last >= TIME_THRESHOLD:
-            should_save = True
-
-    if not should_save:
-        return Response({'status': 'skipped', 'reason': 'No significant change'})
-
-    # Save the reading
-    is_alert = level_cm >= THRESHOLD_WARNING
-
-    reading = WaterLevel.objects.create(
-        sensor=sensor,
-        level_cm=level_cm,
-        is_alert=is_alert
+    # 1. ALWAYS broadcast sensor update via WebSocket (real-time UI)
+    async_to_sync(channel_layer.group_send)(
+        'sensor_data',
+        {
+            'type': 'sensor_update',
+            'device_id': sensor.device_id,
+            'level_cm': level_cm,
+            'status': status_val,
+            'timestamp': now.isoformat(),
+            'is_alert': level_cm >= THRESHOLD_WARNING,
+        }
     )
 
-    # Create alert if threshold exceeded
+    # 2. If alert threshold crossed → broadcast + save alert to DB immediately
+    is_alert = level_cm >= THRESHOLD_WARNING
     if is_alert:
         if level_cm >= THRESHOLD_CRITICAL:
             alert_type = 'critical'
@@ -107,14 +103,53 @@ def receive_sensor_data(request):
             alert_type = 'warning'
             message = f'WARNING: Water level at {level_cm}cm - Monitor closely'
 
-        alert = Alert.objects.create(
-            sensor=sensor,
-            water_level=reading,
-            alert_type=alert_type,
-            message=message
+        async_to_sync(channel_layer.group_send)(
+            'sensor_data',
+            {
+                'type': 'alert_update',
+                'alert_type': alert_type,
+                'sensor_name': sensor.name,
+                'message': message,
+                'timestamp': now.isoformat(),
+            }
         )
 
-        _notification_executor.submit(NotificationService.send_alert_email, alert)
+    # 3. Smart logging: only save to DB if significant change or alert
+    last_reading = WaterLevel.objects.filter(sensor=sensor).order_by('-timestamp').first()
+    should_save = is_alert
+
+    if not should_save and last_reading is not None:
+        time_since_last = now - last_reading.timestamp
+        level_change = abs(level_cm - last_reading.level_cm)
+        if level_change > CHANGE_THRESHOLD or time_since_last >= TIME_THRESHOLD:
+            should_save = True
+    elif not should_save and last_reading is None:
+        should_save = True
+
+    if not should_save:
+        return Response({'status': 'skipped', 'reason': 'No significant change'})
+
+    # 4. Save reading to DB
+    reading = WaterLevel.objects.create(
+        sensor=sensor,
+        level_cm=level_cm,
+        is_alert=is_alert
+    )
+
+    # 5. If alert and not already saved alert record, create it now
+    if is_alert:
+        existing_alert = Alert.objects.filter(
+            sensor=sensor, alert_type=alert_type,
+            created_at__gte=now - timedelta(seconds=10)
+        ).exists()
+        if not existing_alert:
+            alert = Alert.objects.create(
+                sensor=sensor,
+                water_level=reading,
+                alert_type=alert_type,
+                message=message
+            )
+            _notification_executor.submit(NotificationService.send_alert_email, alert)
 
     return Response({'status': 'ok', 'reading_id': reading.id})
 
@@ -127,33 +162,13 @@ def sensor_status_api(request):
     result = []
 
     for sensor in sensors:
-        if sensor.last_seen is None or (now - sensor.last_seen) > OFFLINE_TIMEOUT:
-            current_status = 'offline'
-            current_level = 0
-        else:
-            readings = WaterLevel.objects.filter(sensor=sensor).order_by('-timestamp')[:1]
-            if readings.exists():
-                current_level = readings.first().level_cm
-                prev_readings = list(WaterLevel.objects.filter(sensor=sensor).order_by('-timestamp')[:2])
-                if len(prev_readings) == 2:
-                    if prev_readings[0].level_cm > prev_readings[1].level_cm:
-                        current_status = 'rising'
-                    elif prev_readings[0].level_cm < prev_readings[1].level_cm:
-                        current_status = 'falling'
-                    else:
-                        current_status = 'stable'
-                else:
-                    current_status = 'stable'
-            else:
-                current_status = 'no_data'
-                current_level = 0
-
+        status_result = get_sensor_status(sensor, now)
         result.append({
             'device_id': sensor.device_id,
             'name': sensor.name,
             'location': sensor.location,
-            'status': current_status,
-            'level_cm': current_level,
+            'status': status_result["status"],
+            'level_cm': status_result["current_level"],
             'last_seen': sensor.last_seen.isoformat() if sensor.last_seen else None,
             'latitude': sensor.latitude,
             'longitude': sensor.longitude,
@@ -198,7 +213,7 @@ def system_stats_api(request):
     sensors = Sensor.objects.all()
     total_sensors = sensors.count()
     online_sensors = sensors.filter(
-        last_seen__gte=now - timedelta(seconds=2)
+        last_seen__gte=now - timedelta(seconds=5)
     ).count()
 
     total_readings = WaterLevel.objects.count()

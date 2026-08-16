@@ -14,6 +14,7 @@ DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() == 'true'
 ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -22,8 +23,10 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'channels',
     'core',
     'api',
+    'prediction',
 ]
 
 MIDDLEWARE = [
@@ -56,6 +59,14 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'floodguard.wsgi.application'
+ASGI_APPLICATION = 'floodguard.asgi.application'
+
+# Channel Layers for WebSocket support
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
 
 DATABASES = {
     'default': {
@@ -78,6 +89,15 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
     ],
+}
+
+# Django cache backend (in-memory, per-process)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'floodguard-cache',
+        'TIMEOUT': 300,  # 5 minutes default
+    }
 }
 
 # Email settings for notifications

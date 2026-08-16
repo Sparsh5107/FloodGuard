@@ -8,6 +8,30 @@
     var charts = {};
     var refreshTimer = null;
     var currentType = 'line';
+    var ws = null;
+    var useWebSocket = false;
+    var wsReconnectTimer = null;
+    var WS_RECONNECT_DELAY = 3000;
+    var pollingActive = false;
+
+    // Connection status indicator
+    function createWsStatus() {
+        var el = document.createElement('div');
+        el.id = 'ws-status';
+        el.className = 'ws-status connected';
+        el.innerHTML = '<span class="ws-status-dot"></span><span class="ws-status-text">Connected</span>';
+        document.body.appendChild(el);
+    }
+
+    function updateWsStatus(state) {
+        var el = document.getElementById('ws-status');
+        if (!el) return;
+        el.className = 'ws-status ' + state;
+        var text = el.querySelector('.ws-status-text');
+        if (state === 'connected') text.textContent = 'Connected';
+        else if (state === 'reconnecting') text.textContent = 'Reconnecting...';
+        else text.textContent = 'Disconnected';
+    }
 
     var LEVEL_COLORS = {
         normal: { line: '#22c55e', bg: 'rgba(34, 197, 94, 0.08)' },
@@ -57,9 +81,15 @@
 
     function fetchHistory(deviceId) {
         return fetch('/api/sensor-history/' + deviceId + '/?_=' + Date.now(), { cache: 'no-store' })
-            .then(function (r) { return r.json(); })
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
             .then(function (d) { return d.history || []; })
-            .catch(function () { return []; });
+            .catch(function (err) {
+                console.error('History fetch error for', deviceId + ':', err);
+                return [];
+            });
     }
 
     function buildOverview() {
@@ -102,6 +132,11 @@
             var isCritical = hasCritical(SENSORS);
             refreshEl.textContent = isCritical ? 'CRITICAL' : 'Live';
             refreshEl.style.color = isCritical ? '#ef4444' : '#22c55e';
+
+            var statusEl = document.getElementById('refresh-interval');
+            var dotEl = document.getElementById('refresh-dot');
+            if (statusEl) statusEl.textContent = isCritical ? '5s (Alert Active)' : '5 sec';
+            if (dotEl) { dotEl.style.background = isCritical ? '#ef4444' : '#22c55e'; dotEl.classList.toggle('pulse', isCritical); }
         }
     }
 
@@ -145,6 +180,7 @@
     function createChart(canvasId, history, sensorName, type) {
         var ctx = document.getElementById(canvasId);
         if (!ctx) return null;
+        if (!history || history.length === 0) return null;
 
         var timeData = history.map(function (h) { return { x: new Date(h.timestamp), y: h.level_cm }; });
         var barLabels = history.map(function (h) { return formatTime(h.timestamp); });
@@ -302,6 +338,7 @@
             var promises = SENSORS.map(function (sensor) {
                 return fetchHistory(sensor.device_id).then(function (history) {
                     if (!charts[sensor.device_id]) return;
+                    if (!history || history.length === 0) return;
                     var chart = charts[sensor.device_id];
                     if (currentType === 'bar') {
                         chart.data.labels = history.map(function (h) { return formatTime(h.timestamp); });
@@ -340,8 +377,182 @@
         refreshTimer = setTimeout(refreshAll, interval);
     }
 
+    // ===================== WEBSOCKET =====================
+
+    function connectWebSocket() {
+        var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var wsUrl = protocol + '//' + location.host + '/ws/sensors/';
+
+        try {
+            ws = new WebSocket(wsUrl);
+        } catch(e) {
+            return;
+        }
+
+        ws.onopen = function() {
+            useWebSocket = true;
+            if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+            updateWsStatus('connected');
+            console.log('WebSocket connected (data-charts)');
+        };
+
+        ws.onmessage = function(event) {
+            try {
+                var data = JSON.parse(event.data);
+                if (data.type === 'sensor_update') {
+                    handleWsSensorUpdate(data);
+                }
+            } catch(e) {
+                console.error('WS parse error:', e);
+            }
+        };
+
+        ws.onclose = function() {
+            useWebSocket = false;
+            updateWsStatus('reconnecting');
+            console.log('WebSocket closed (data-charts), retrying...');
+            if (!pollingActive) {
+                pollingActive = true;
+                scheduleNext();
+            }
+            wsReconnectTimer = setTimeout(connectWebSocket, WS_RECONNECT_DELAY);
+        };
+
+        ws.onerror = function() {
+            useWebSocket = false;
+            updateWsStatus('disconnected');
+            if (!pollingActive) {
+                pollingActive = true;
+                scheduleNext();
+            }
+            ws.close();
+        };
+    }
+
+    function handleWsSensorUpdate(data) {
+        if (!SENSORS) return;
+
+        var match = SENSORS.find(function (s) { return s.device_id === data.device_id; });
+        if (match) {
+            match.level = data.level_cm;
+            match.status = data.status;
+            if (data.level_cm >= 70) match.alert_level = 'critical';
+            else if (data.level_cm >= 50) match.alert_level = 'danger';
+            else if (data.level_cm >= 30) match.alert_level = 'warning';
+            else match.alert_level = 'normal';
+        }
+
+        buildOverview();
+        updateLiveStats();
+
+        // Update chart with new level
+        if (charts[data.device_id]) {
+            var chart = charts[data.device_id];
+            var now = new Date();
+
+            if (currentType === 'bar') {
+                chart.data.labels.push(formatTime(now));
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.push(data.level_cm);
+                chart.data.datasets[0].data.shift();
+                var newVal = data.level_cm;
+                var newColor = (newVal >= 70 ? '#ef4444' : newVal >= 50 ? '#f97316' : newVal >= 30 ? '#eab308' : '#22c55e');
+                chart.data.datasets[0].backgroundColor.push(newColor + 'BB');
+                chart.data.datasets[0].backgroundColor.shift();
+                chart.data.datasets[0].borderColor.push(newColor);
+                chart.data.datasets[0].borderColor.shift();
+            } else if (currentType === 'polarArea') {
+                chart.data.datasets[0].data.push(data.level_cm);
+                chart.data.datasets[0].data.shift();
+                var pColor = data.level_cm >= 70 ? 'rgba(239,68,68,0.7)' : data.level_cm >= 50 ? 'rgba(249,115,22,0.7)' : data.level_cm >= 30 ? 'rgba(234,179,8,0.7)' : 'rgba(34,197,94,0.7)';
+                chart.data.datasets[0].backgroundColor.push(pColor);
+                chart.data.datasets[0].backgroundColor.shift();
+            } else {
+                chart.data.datasets[0].data.push({ x: now, y: data.level_cm });
+                if (chart.data.datasets[0].data.length > 50) {
+                    chart.data.datasets[0].data.shift();
+                }
+                chart.data.datasets[0].pointRadius = chart.data.datasets[0].data.length > 30 ? 0 : 3;
+            }
+
+            chart.update('none');
+
+            // Update chart card header level text
+            var cardEl = document.getElementById('chart-card-' + data.device_id);
+            if (cardEl) {
+                var levelEl = cardEl.querySelector('.chart-card-level');
+                if (levelEl) {
+                    var color = data.level_cm >= 70 ? '#ef4444' : data.level_cm >= 50 ? '#f97316' : data.level_cm >= 30 ? '#eab308' : '#22c55e';
+                    levelEl.textContent = data.level_cm + ' cm';
+                    levelEl.style.color = color;
+                }
+            }
+        }
+
+        // Instantly refresh readings + alerts tables on every WS message
+        fetchReadingsAndAlerts();
+    }
+
+    function fetchReadingsAndAlerts() {
+        fetch('/api/dashboard-data/?_=' + Date.now(), {cache: 'no-store'})
+            .then(function(response) {
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return response.json();
+            })
+            .then(function(data) {
+                if (data.readings) {
+                    var readingsTbody = document.querySelector('#readings-table tbody');
+                    if (readingsTbody) {
+                        var html = '';
+                        data.readings.forEach(function(r) {
+                            var statusHtml = r.is_alert
+                                ? '<span class="status-alert">ALERT</span>'
+                                : '<span class="status-normal">Normal</span>';
+                            html += '<tr>' +
+                                '<td>' + escapeHtml(r.sensor_name) + '</td>' +
+                                '<td>' + escapeHtml(r.location) + '</td>' +
+                                '<td><strong>' + escapeHtml(String(r.level_cm)) + '</strong></td>' +
+                                '<td>' + statusHtml + '</td>' +
+                                '<td>' + escapeHtml(r.timestamp) + '</td>' +
+                                '</tr>';
+                        });
+                        if (!html) html = '<tr><td colspan="5" class="no-data">No readings yet</td></tr>';
+                        readingsTbody.innerHTML = html;
+                    }
+                }
+                if (data.alerts) {
+                    var alertsTbody = document.querySelector('#alert-log-table tbody');
+                    if (alertsTbody) {
+                        var ahtml = '';
+                        data.alerts.forEach(function(a) {
+                            ahtml += '<tr>' +
+                                '<td>' + escapeHtml(a.sensor_name) + '</td>' +
+                                '<td>' + escapeHtml(a.location) + '</td>' +
+                                '<td><span class="alert-badge alert-' + escapeHtml(a.alert_type) + '">' + escapeHtml(a.alert_type.toUpperCase()) + '</span></td>' +
+                                '<td>' + escapeHtml(a.message) + '</td>' +
+                                '<td>' + escapeHtml(a.created_at) + '</td>' +
+                                '</tr>';
+                        });
+                        if (!ahtml) ahtml = '<tr><td colspan="5" class="no-data">No alerts recorded</td></tr>';
+                        alertsTbody.innerHTML = ahtml;
+                    }
+                }
+            })
+            .catch(function(err) {
+                console.warn('Readings/alerts poll error:', err);
+            });
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        var div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
     function init() {
         if (!SENSORS || SENSORS.length === 0) return;
+        createWsStatus();
         buildOverview();
         var selector = document.getElementById('chart-type-selector');
         if (selector) {
@@ -356,7 +567,22 @@
                 buildAllCharts(type).then(scheduleNext).catch(scheduleNext);
             });
         }
-        buildAllCharts(currentType).then(scheduleNext).catch(scheduleNext);
+        buildAllCharts(currentType).then(function() {
+            // Try WebSocket first, fall back to polling
+            connectWebSocket();
+
+            // Offline detection + readings/alerts refresh — every 5 sec even when WS is connected
+            setInterval(function() {
+                refreshAll();
+                fetchReadingsAndAlerts();
+            }, 5000);
+
+            setTimeout(function() {
+                if (!useWebSocket) {
+                    scheduleNext();
+                }
+            }, 5000);
+        }).catch(scheduleNext);
     }
 
     document.addEventListener('DOMContentLoaded', init);

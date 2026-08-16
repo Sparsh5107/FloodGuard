@@ -86,7 +86,4 @@ class NotificationService:
                     status='failed', error_message=last_error
                 )
 
-    @staticmethod
-    def send_critical_alert_email(alert: Alert):
-        """Legacy alias for backwards compatibility."""
-        NotificationService.send_alert_email(alert)
+

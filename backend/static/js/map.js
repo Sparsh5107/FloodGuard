@@ -11,11 +11,36 @@
     var historyCache = {};
     var historyPending = {};
     var firstLoad = true;
+    var ws = null;
+    var useWebSocket = false;
+    var wsReconnectTimer = null;
+    var WS_RECONNECT_DELAY = 3000;
+    var pollingActive = false;
+
+    // Connection status indicator
+    function createWsStatus() {
+        var el = document.createElement('div');
+        el.id = 'ws-status';
+        el.className = 'ws-status connected';
+        el.innerHTML = '<span class="ws-status-dot"></span><span class="ws-status-text">Connected</span>';
+        document.body.appendChild(el);
+    }
+
+    function updateWsStatus(state) {
+        var el = document.getElementById('ws-status');
+        if (!el) return;
+        el.className = 'ws-status ' + state;
+        var text = el.querySelector('.ws-status-text');
+        if (state === 'connected') text.textContent = 'Connected';
+        else if (state === 'reconnecting') text.textContent = 'Reconnecting...';
+        else text.textContent = 'Disconnected';
+    }
 
     // Layer references
     var streetLayer = null;
     var satelliteLayer = null;
     var connectionLines = [];
+    var alertZones = [];
     var isSatellite = false;
     var isLines = false;
 
@@ -42,9 +67,40 @@
         return status.charAt(0).toUpperCase() + status.slice(1);
     }
 
+    // --- Alert Zone Overlays ---
+    function getAlertRadius(levelCm) {
+        if (levelCm >= 70) return 800;
+        if (levelCm >= 50) return 500;
+        if (levelCm >= 30) return 300;
+        return 150;
+    }
+
+    function removeAlertZones() {
+        alertZones.forEach(function (zone) { map.removeLayer(zone); });
+        alertZones = [];
+    }
+
+    function addAlertZones(sensors) {
+        removeAlertZones();
+        sensors.forEach(function (sensor) {
+            if (sensor.latitude == null || sensor.longitude == null) return;
+            var color = getMarkerColor(sensor.level_cm, sensor.status);
+            var zone = L.circle([sensor.latitude, sensor.longitude], {
+                radius: getAlertRadius(sensor.level_cm),
+                color: color,
+                fillColor: color,
+                fillOpacity: 0.12,
+                weight: sensor.level_cm >= 70 ? 3 : 1,
+                dashArray: sensor.status === 'offline' ? '5, 10' : null,
+                className: 'alert-zone alert-zone-' + sensor.status
+            }).addTo(map);
+            alertZones.push(zone);
+        });
+    }
+
     // --- SVG Water Droplet Marker ---
     var dropletIdCounter = 0;
-    function createDropletIcon(color, levelCm, isPulse) {
+    function createDropletIcon(color, levelCm, status) {
         var size = getMarkerSize(levelCm);
         var uid = 'ds-' + (++dropletIdCounter);
         var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + (size + 8) + '" viewBox="0 0 40 48">' +
@@ -58,9 +114,13 @@
             '<ellipse cx="14" cy="28" rx="4" ry="5" fill="rgba(255,255,255,0.3)"/>' +
             '</svg>';
 
+        var shouldPulse = status === 'rising' || status === 'falling' || status === 'critical' || levelCm >= 70;
+        var pulseClass = shouldPulse ? ' droplet-pulse-active' : '';
+        var pulseSpeed = status === 'critical' ? '1s' : '2s';
+
         var pulseHtml = '';
-        if (isPulse) {
-            pulseHtml = '<div class="droplet-pulse" style="width:' + (size + 20) + 'px;height:' + (size + 20) + 'px;border-color:' + color + ';"></div>';
+        if (shouldPulse) {
+            pulseHtml = '<div class="droplet-pulse' + pulseClass + '" style="width:' + (size + 24) + 'px;height:' + (size + 24) + 'px;border-color:' + color + ';animation-duration:' + pulseSpeed + ';"></div>';
         }
 
         return L.divIcon({
@@ -123,8 +183,20 @@
         if (linesToggle) linesToggle.addEventListener('click', toggleLines);
         if (timelineSlider) timelineSlider.addEventListener('input', onTimelineChange);
 
+        // Initial data load
         pollSensorStatus();
-        setInterval(pollSensorStatus, POLL_INTERVAL);
+
+        // Try WebSocket first, fall back to polling
+        connectWebSocket();
+
+        // Offline detection poll — runs every 5 sec even when WS is connected
+        setInterval(pollSensorStatus, 5000);
+
+        setTimeout(function() {
+            if (!useWebSocket) {
+                fallbackToPolling();
+            }
+        }, 5000);
     }
 
     // --- Controls ---
@@ -221,8 +293,8 @@
             }
 
             if (markers[sensor.device_id]) {
-                var color = getMarkerColor(closest.level_cm, sensor.status);
-                var icon = createDropletIcon(color, closest.level_cm, false);
+            var color = getMarkerColor(sensor.level_cm, sensor.status);
+            var icon = createDropletIcon(color, sensor.level_cm, sensor.status);
                 markers[sensor.device_id].setIcon(icon);
             }
         });
@@ -231,9 +303,8 @@
     function applyLiveValues() {
         sensorData.forEach(function (sensor) {
             if (markers[sensor.device_id]) {
-                var color = getMarkerColor(sensor.level_cm, sensor.status);
-                var isPulse = sensor.status === 'rising' && sensor.level_cm >= 70;
-                var icon = createDropletIcon(color, sensor.level_cm, isPulse);
+                var color = getMarkerColor(closest.level_cm, sensor.status);
+                var icon = createDropletIcon(color, closest.level_cm, sensor.status);
                 markers[sensor.device_id].setIcon(icon);
             }
         });
@@ -252,12 +323,16 @@
         if (historyCache[deviceId] || historyPending[deviceId]) return Promise.resolve();
         historyPending[deviceId] = true;
         return fetch('/api/sensor-history/' + deviceId + '/?_=' + Date.now(), { cache: 'no-store' })
-            .then(function (r) { return r.json(); })
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
             .then(function (data) {
                 historyCache[deviceId] = data.history || [];
                 historyPending[deviceId] = false;
             })
-            .catch(function () {
+            .catch(function (err) {
+                console.error('Map history fetch error for', deviceId + ':', err);
                 historyPending[deviceId] = false;
             });
     }
@@ -277,12 +352,111 @@
                 if (!data.sensors) return;
                 sensorData = data.sensors;
                 updateMarkers(data.sensors);
+                addAlertZones(data.sensors);
                 updateSidebar(data.sensors);
                 if (isLines) drawConnectionLines();
                 if (timelineValue >= 100) applyLiveValues();
                 fetchAllHistory();
             })
             .catch(function (err) { console.error('Map poll error:', err); });
+    }
+
+    // --- WebSocket ---
+    function connectWebSocket() {
+        var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var wsUrl = protocol + '//' + location.host + '/ws/sensors/';
+
+        try {
+            ws = new WebSocket(wsUrl);
+        } catch(e) {
+            console.error('WebSocket construction failed:', e);
+            useWebSocket = false;
+            if (!pollingActive) {
+                pollingActive = true;
+                setInterval(pollSensorStatus, POLL_INTERVAL);
+            }
+            return;
+        }
+
+        ws.onopen = function() {
+            useWebSocket = true;
+            if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+            updateWsStatus('connected');
+            console.log('WebSocket connected (map)');
+        };
+
+        ws.onmessage = function(event) {
+            try {
+                var data = JSON.parse(event.data);
+                if (data.type === 'sensor_update') {
+                    handleWsSensorUpdate(data);
+                }
+            } catch(e) {
+                console.error('WS parse error:', e);
+            }
+        };
+
+        ws.onclose = function() {
+            useWebSocket = false;
+            updateWsStatus('reconnecting');
+            console.log('WebSocket closed (map), falling back to polling');
+            if (!pollingActive) {
+                pollingActive = true;
+                setInterval(pollSensorStatus, POLL_INTERVAL);
+            }
+            wsReconnectTimer = setTimeout(connectWebSocket, WS_RECONNECT_DELAY);
+        };
+
+        ws.onerror = function() {
+            useWebSocket = false;
+            updateWsStatus('disconnected');
+            if (!pollingActive) {
+                pollingActive = true;
+                setInterval(pollSensorStatus, POLL_INTERVAL);
+            }
+            ws.close();
+        };
+    }
+
+    function handleWsSensorUpdate(data) {
+        // Find or create sensor data entry
+        var existing = sensorData.find(function(s) { return s.device_id === data.device_id; });
+        if (existing) {
+            existing.level_cm = data.level_cm;
+            existing.status = data.status;
+        } else {
+            sensorData.push({
+                device_id: data.device_id,
+                level_cm: data.level_cm,
+                status: data.status,
+                name: data.device_id,
+                location: ''
+            });
+        }
+
+        // Update marker
+        if (markers[data.device_id]) {
+            var color = getMarkerColor(data.level_cm, data.status);
+            var icon = createDropletIcon(color, data.level_cm, data.status);
+            markers[data.device_id].setIcon(icon);
+
+            var sensor = sensorData.find(function(s) { return s.device_id === data.device_id; });
+            if (sensor) {
+                markers[data.device_id].setPopupContent(buildPopup(sensor));
+            }
+        }
+
+        // Update sidebar
+        if (existing) {
+            addAlertZones(sensorData);
+            updateSidebar(sensorData);
+            if (isLines) drawConnectionLines();
+            if (timelineValue >= 100) applyLiveValues();
+        }
+    }
+
+    function fallbackToPolling() {
+        setInterval(pollSensorStatus, POLL_INTERVAL);
     }
 
     // --- Markers ---
@@ -294,8 +468,7 @@
             validIds.push(sensor.device_id);
 
             var color = getMarkerColor(sensor.level_cm, sensor.status);
-            var isPulse = sensor.status === 'rising' && sensor.level_cm >= 70;
-            var icon = createDropletIcon(color, sensor.level_cm, isPulse);
+            var icon = createDropletIcon(color, sensor.level_cm, sensor.status);
             var popupHtml = buildPopup(sensor);
 
             if (markers[sensor.device_id]) {
@@ -345,7 +518,7 @@
             var isActive = sensor.status !== 'offline';
             var pct = Math.min((sensor.level_cm / 100) * 100, 100);
 
-            html += '<div class="sidebar-sensor" data-device="' + sensor.device_id + '">' +
+            html += '<div class="sidebar-sensor' + (sensor.level_cm >= 70 ? ' sidebar-sensor-critical' : '') + '" data-device="' + sensor.device_id + '">' +
                 '<div class="sidebar-sensor-top">' +
                 '<div class="sidebar-droplet-mini" style="background:' + color + ';"></div>' +
                 '<div class="sidebar-sensor-info">' +
@@ -378,6 +551,7 @@
 
     // --- Init ---
     document.addEventListener('DOMContentLoaded', function () {
+        createWsStatus();
         initMap();
     });
 })();

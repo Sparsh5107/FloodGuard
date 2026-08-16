@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Predictions - FloodGuard{% endblock %}
+
+{% block extra_head %}
+<script src="{% static 'vendor/chart.umd.min.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+<div class="predictions-page">
+    <div class="page-header">
+        <h1>Flood Predictions</h1>
+        <p class="subtitle">AI-powered flood risk assessment combining weather forecasts and sensor data</p>
+    </div>
+
+    <!-- Auto-refresh indicator -->
+    <div class="refresh-indicator" id="refresh-indicator">
+        <span class="refresh-dot"></span>
+        <span class="refresh-text">Auto-refreshing every 30s</span>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div class="predictions-loading" id="predictions-loading">
+        <div class="loading-spinner"></div>
+        <p>Loading predictions...</p>
+        <p class="loading-hint">Fetching weather data and running ML models</p>
+    </div>
+
+    <!-- Live Stats Bar (hidden until loaded) -->
+    <div class="pred-stats-bar" id="pred-stats-bar" style="display:none;">
+        <div class="pred-stat">
+            <span class="pred-stat-icon weather-icon">&#9729;</span>
+            <div class="pred-stat-info">
+                <span class="pred-stat-value" id="avg-weather-risk">--</span>
+                <span class="pred-stat-label">Avg Weather Risk</span>
+            </div>
+        </div>
+        <div class="pred-stat">
+            <span class="pred-stat-icon flood-icon">&#9888;</span>
+            <div class="pred-stat-info">
+                <span class="pred-stat-value" id="avg-flood-risk">--</span>
+                <span class="pred-stat-label">Avg Flood Risk</span>
+            </div>
+        </div>
+        <div class="pred-stat">
+            <span class="pred-stat-icon status-icon">&#8634;</span>
+            <div class="pred-stat-info">
+                <span class="pred-stat-value" id="sensor-count">--</span>
+                <span class="pred-stat-label">Sensors Monitored</span>
+            </div>
+        </div>
+        <div class="pred-stat">
+            <span class="pred-stat-icon time-icon">&#9202;</span>
+            <div class="pred-stat-info">
+                <span class="pred-stat-value" id="last-updated">--</span>
+                <span class="pred-stat-label">Last Updated</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sensor Prediction Cards (populated by JS) -->
+    <div class="predictions-grid" id="predictions-grid">
+        <div class="no-predictions" id="no-predictions" style="display:none;">
+            <p>No active sensors found. Add sensors to start receiving predictions.</p>
+        </div>
+    </div>
+
+    <!-- Risk History Chart -->
+    <div class="chart-section">
+        <h2 class="section-title">Risk History</h2>
+        <div class="chart-container">
+            <canvas id="riskHistoryChart"></canvas>
+        </div>
+    </div>
+
+    <!-- What-If Simulator -->
+    <div class="whatif-section">
+        <h2 class="section-title">What-If Flood Simulator</h2>
+        <p class="section-subtitle">Simulate flood risk using the SCS Curve Number method — the industry standard used by FEMA and USDA for rainfall-runoff calculations</p>
+
+        <div class="whatif-grid">
+            <div class="whatif-controls">
+                <div class="whatif-form-group">
+                    <label for="whatif-sensor">Select Sensor</label>
+                    <select id="whatif-sensor" class="whatif-select">
+                        <option value="">Loading sensors...</option>
+                    </select>
+                    <span class="whatif-hint">Choose the sensor location you want to simulate for</span>
+                </div>
+
+                <div class="whatif-form-group">
+                    <label for="whatif-soil">Soil Type</label>
+                    <select id="whatif-soil" class="whatif-select">
+                        <option value="sandy">Sandy — High infiltration, low runoff</option>
+                        <option value="loam" selected>Loam — Moderate infiltration</option>
+                        <option value="clay_loam">Clay Loam — Low infiltration, moderate runoff</option>
+                        <option value="clay">Clay — Very low infiltration, high runoff</option>
+                    </select>
+                    <span class="whatif-hint">Soil type determines how much water soaks into the ground</span>
+                </div>
+
+                <div class="whatif-form-group">
+                    <label for="whatif-land">Land Use</label>
+                    <select id="whatif-land" class="whatif-select">
+                        <option value="forest">Forest — Trees, high infiltration</option>
+                        <option value="pasture">Pasture — Grass, moderate infiltration</option>
+                        <option value="agriculture">Agriculture — Crops, variable</option>
+                        <option value="residential" selected>Residential — Houses with yards</option>
+                        <option value="commercial">Commercial — Mostly pavement</option>
+                    </select>
+                    <span class="whatif-hint">Land use affects how much water runs off vs soaks in</span>
+                </div>
+
+                <div class="whatif-form-group">
+                    <label for="whatif-rainfall">Rainfall Amount: <span id="rainfall-value">20</span> mm</label>
+                    <input type="range" id="whatif-rainfall" class="whatif-slider" min="0" max="150" value="20">
+                    <div class="slider-labels">
+                        <span>0mm</span>
+                        <span>50mm</span>
+                        <span>100mm</span>
+                        <span>150mm</span>
+                    </div>
+                    <span class="whatif-hint">Total expected rainfall. Light: 1-10mm, Moderate: 10-30mm, Heavy: 30-70mm, Extreme: 70mm+</span>
+                </div>
+
+                <div class="whatif-form-group">
+                    <label for="whatif-duration">Duration: <span id="duration-value">3</span> hours</label>
+                    <input type="range" id="whatif-duration" class="whatif-slider" min="1" max="24" value="3">
+                    <div class="slider-labels">
+                        <span>1h</span>
+                        <span>6h</span>
+                        <span>12h</span>
+                        <span>24h</span>
+                    </div>
+                    <span class="whatif-hint">Same rain in shorter time = higher intensity = more flooding</span>
+                </div>
+
+                <button id="whatif-run" class="whatif-button">Run Simulation</button>
+            </div>
+
+            <div class="whatif-results" id="whatif-results" style="display:none;">
+                <div class="whatif-result-header">
+                    <span class="whatif-result-title">Simulation Result</span>
+                </div>
+
+                <div class="whatif-analysis" id="whatif-analysis"></div>
+
+                <div class="whatif-result-grid">
+                    <div class="whatif-result-item">
+                        <span class="whatif-result-label">Current Level</span>
+                        <span class="whatif-result-value" id="whatif-current">--</span>
+                        <span class="whatif-result-hint">Water level right now</span>
+                    </div>
+                    <div class="whatif-result-item">
+                        <span class="whatif-result-label">Projected Level</span>
+                        <span class="whatif-result-value" id="whatif-projected">--</span>
+                        <span class="whatif-result-hint">Expected level after rainfall</span>
+                    </div>
+                    <div class="whatif-result-item">
+                        <span class="whatif-result-label">Water Rise</span>
+                        <span class="whatif-result-value" id="whatif-rise">--</span>
+                        <span class="whatif-result-hint">How much water level increases</span>
+                    </div>
+                    <div class="whatif-result-item">
+                        <span class="whatif-result-label">Runoff</span>
+                        <span class="whatif-result-value" id="whatif-runoff">--</span>
+                        <span class="whatif-result-hint">Water flowing over ground</span>
+                    </div>
+                    <div class="whatif-result-item">
+                        <span class="whatif-result-label">Flood Risk</span>
+                        <span class="whatif-result-value" id="whatif-risk">--</span>
+                        <span class="whatif-result-hint">0-100% chance of flooding</span>
+                    </div>
+                    <div class="whatif-result-item">
+                        <span class="whatif-result-label">Time to Critical</span>
+                        <span class="whatif-result-value" id="whatif-time">--</span>
+                        <span class="whatif-result-hint">When water hits 70cm</span>
+                    </div>
+                </div>
+
+                <div class="whatif-warnings" id="whatif-warnings"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/predictions.js' %}"></script>
+{% endblock %}

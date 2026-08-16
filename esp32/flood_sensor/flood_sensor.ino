@@ -34,32 +34,43 @@ void setup() {
 }
 
 float readWaterLevel(int pin) {
-  int rawValue = analogRead(pin);
-  float levelCm = map(rawValue, 0, 4095, 0, 100);
+  long sum = 0;
+  for (int i = 0; i < 10; i++) {
+    sum += analogRead(pin);
+    delay(2);
+  }
+  float avg = sum / 10.0;
+  float levelCm = map(avg, 0, 4095, 0, 100);
   return levelCm;
 }
 
 void sendSensorData(const char *deviceId, float levelCm) {
-  HTTPClient http;
-  http.begin(serverUrl);
-  http.addHeader("Content-Type", "application/json");
+  for (int attempt = 0; attempt < 3; attempt++) {
+    HTTPClient http;
+    http.begin(serverUrl);
+    http.addHeader("Content-Type", "application/json");
 
-  String jsonData = "{\"device_id\":\"" + String(deviceId) +
-                    "\",\"level_cm\":" + String(levelCm) + "}";
-  int httpResponseCode = http.POST(jsonData);
+    String jsonData = "{\"device_id\":\"" + String(deviceId) +
+                      "\",\"level_cm\":" + String(levelCm) + "}";
+    int httpResponseCode = http.POST(jsonData);
+    http.end();
 
-  if (httpResponseCode > 0) {
-    Serial.print("Sent ");
-    Serial.print(deviceId);
-    Serial.print(": ");
-    Serial.print(levelCm);
-    Serial.println(" cm");
-  } else {
-    Serial.print("Error: ");
+    if (httpResponseCode > 0) {
+      Serial.print("Sent ");
+      Serial.print(deviceId);
+      Serial.print(": ");
+      Serial.print(levelCm);
+      Serial.println(" cm");
+      return;
+    }
+
+    Serial.print("Retry ");
+    Serial.print(attempt + 1);
+    Serial.print("/3 for ");
     Serial.println(deviceId);
+    delay(100);
   }
-
-  http.end();
+  Serial.println("Failed after 3 attempts: " + String(deviceId));
 }
 
 void loop() {
